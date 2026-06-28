@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<!-- ════════════════════════════════════════════════════════════════════
+     PHOTO DUMP — single-file site backed by Supabase
+     ─────────────────────────────────────────────────────────────────────
+     SETUP (do this once in your Supabase project, see the chat steps):
+       1. Create a PUBLIC storage bucket named:  photos
+       2. Create a table named:  photos  (sql provided in chat)
+       3. Turn on email auth (magic link)
+       4. Paste your URL + anon key in the two lines marked  EDIT  below
+     Full-resolution originals are served straight from Supabase's CDN.
+     ════════════════════════════════════════════════════════════════════ -->
+<title>Photo Dump</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --bg:#14110d;          /* warm near-black */
+    --bg2:#1d1a15;
+    --ink:#f2efe9;         /* paper */
+    --muted:#928b7e;
+    --amber:#d98a3c;       /* darkroom safelight — used sparingly */
+    --line:#2a261f;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--ink);font-family:"Space Grotesk",system-ui,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.5}
+  ::selection{background:var(--amber);color:#1a1610}
+  .mono{font-family:"Space Mono",monospace}
+
+  /* ── header ── */
+  header{position:sticky;top:0;z-index:30;background:rgba(20,17,13,.86);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .bar{max-width:1320px;margin:0 auto;padding:0 22px;height:64px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+  .brand{display:flex;align-items:baseline;gap:12px}
+  .brand h1{font-size:1.35rem;font-weight:700;letter-spacing:-.01em}
+  .brand .roll{font-family:"Space Mono",monospace;font-size:.66rem;letter-spacing:.16em;color:var(--amber);text-transform:uppercase}
+  .actions{display:flex;align-items:center;gap:10px}
+  .ibtn{font-family:"Space Mono",monospace;font-size:.74rem;letter-spacing:.05em;text-transform:uppercase;
+    background:transparent;color:var(--muted);border:1px solid var(--line);padding:9px 14px;border-radius:3px;cursor:pointer;transition:.18s}
+  .ibtn:hover{color:var(--ink);border-color:#3a352b}
+  .ibtn.go{background:var(--amber);color:#1a1610;border-color:var(--amber)}
+  .ibtn.go:hover{background:#e89b4d;filter:brightness(1.05)}
+  .who{font-family:"Space Mono",monospace;font-size:.7rem;color:var(--muted);display:none}
+
+  /* ── intro ── */
+  .intro{max-width:1320px;margin:0 auto;padding:40px 22px 12px}
+  .intro p{color:var(--muted);max-width:560px;font-size:1.02rem}
+  .intro .count{font-family:"Space Mono",monospace;font-size:.7rem;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);margin-bottom:10px}
+
+  /* ── contact-sheet gallery (masonry via columns) ── */
+  .sheet{max-width:1320px;margin:0 auto;padding:22px;columns:4 280px;column-gap:14px}
+  figure{break-inside:avoid;margin:0 0 14px;position:relative;background:var(--bg2);border:1px solid var(--line);border-radius:4px;overflow:hidden;cursor:zoom-in;transition:border-color .2s,transform .2s}
+  figure:hover{border-color:#46402f;transform:translateY(-2px)}
+  figure img{display:block;width:100%;height:auto;background:#0c0a07}
+  figure .idx{position:absolute;top:8px;left:8px;font-family:"Space Mono",monospace;font-size:.6rem;letter-spacing:.1em;
+    color:#f2efe9;background:rgba(0,0,0,.55);padding:3px 7px;border-radius:2px;backdrop-filter:blur(2px)}
+  figcaption{padding:9px 11px;font-size:.86rem;color:#cfc8ba;border-top:1px solid var(--line)}
+  figure:hover .idx{color:var(--amber)}
+
+  /* states */
+  .state{max-width:1320px;margin:0 auto;padding:80px 22px;text-align:center;color:var(--muted)}
+  .state h3{font-size:1.4rem;color:var(--ink);margin-bottom:8px;font-weight:600}
+  .state code{font-family:"Space Mono",monospace;color:var(--amber);background:var(--bg2);padding:2px 6px;border-radius:3px}
+  .skel{columns:4 280px;column-gap:14px;max-width:1320px;margin:0 auto;padding:22px}
+  .skel span{display:block;break-inside:avoid;margin-bottom:14px;border-radius:4px;background:linear-gradient(100deg,var(--bg2) 30%,#262219 50%,var(--bg2) 70%);background-size:200% 100%;animation:sh 1.3s infinite}
+  @keyframes sh{to{background-position:-200% 0}}
+
+  /* ── lightbox ── */
+  .lb{position:fixed;inset:0;z-index:60;background:#000;display:none;align-items:center;justify-content:center;flex-direction:column}
+  .lb.open{display:flex}
+  .lb img{max-width:96vw;max-height:84vh;object-fit:contain;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+  .lb .cap{font-family:"Space Mono",monospace;font-size:.8rem;color:#cfc8ba;margin-top:16px;text-align:center;padding:0 20px}
+  .lb .cap b{color:var(--amber);margin-right:10px}
+  .lb .x{position:absolute;top:16px;right:18px;font-size:1.6rem;color:#fff;background:none;border:none;cursor:pointer;opacity:.7}
+  .lb .x:hover{opacity:1}
+  .lb .nav{position:absolute;top:50%;transform:translateY(-50%);font-size:2rem;color:#fff;background:rgba(0,0,0,.3);border:none;cursor:pointer;padding:14px 18px;opacity:.6;user-select:none}
+  .lb .nav:hover{opacity:1}
+  .lb .prev{left:8px}.lb .next{right:8px}
+
+  /* ── upload / auth panel ── */
+  .panel{position:fixed;inset:0;z-index:70;background:rgba(8,6,4,.7);backdrop-filter:blur(4px);display:none;align-items:flex-end;justify-content:center}
+  .panel.open{display:flex}
+  .sheet2{width:100%;max-width:560px;background:var(--bg2);border:1px solid var(--line);border-radius:14px 14px 0 0;padding:26px 24px 34px;max-height:88vh;overflow:auto}
+  @media(min-width:620px){.panel{align-items:center}.sheet2{border-radius:14px}}
+  .sheet2 h2{font-size:1.3rem;margin-bottom:4px}
+  .sheet2 p.sub{color:var(--muted);font-size:.92rem;margin-bottom:20px}
+  label.fld{display:block;font-family:"Space Mono",monospace;font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:14px 0 7px}
+  input[type=email],input[type=text]{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--ink);
+    font-family:inherit;font-size:1rem;padding:12px 14px;border-radius:6px;outline:none}
+  input:focus{border-color:var(--amber)}
+  .drop{border:1.5px dashed #3a352b;border-radius:8px;padding:26px;text-align:center;color:var(--muted);cursor:pointer;transition:.2s}
+  .drop:hover{border-color:var(--amber);color:var(--ink)}
+  .pbtn{width:100%;margin-top:20px;font-family:"Space Mono",monospace;font-size:.86rem;letter-spacing:.05em;text-transform:uppercase;
+    background:var(--amber);color:#1a1610;border:none;padding:14px;border-radius:6px;cursor:pointer;transition:.18s}
+  .pbtn:hover{filter:brightness(1.06)}
+  .pbtn:disabled{opacity:.5;cursor:default}
+  .msg{font-family:"Space Mono",monospace;font-size:.8rem;margin-top:14px;color:var(--muted);min-height:1.2em}
+  .msg.ok{color:#7ec98a}.msg.err{color:#e0795f}
+  .close-x{float:right;background:none;border:none;color:var(--muted);font-size:1.4rem;cursor:pointer;line-height:1}
+
+  @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <div class="brand">
+      <!-- EDIT: your title -->
+      <h1>Photo Dump</h1>
+      <span class="roll mono">Roll · 2026</span>
+    </div>
+    <div class="actions">
+      <span class="who mono" id="who"></span>
+      <button class="ibtn" id="ownerBtn">Sign in</button>
+      <button class="ibtn go" id="addBtn" style="display:none">+ Add</button>
+    </div>
+  </div>
+</header>
+
+<div class="intro">
+  <div class="count mono" id="count">Loading…</div>
+  <!-- EDIT: a line about your dump -->
+  <p>A rolling sheet of full-resolution frames. Tap any photo to open it at full size.</p>
+</div>
+
+<div id="view">
+  <div class="skel"><span style="height:240px"></span><span style="height:300px"></span><span style="height:200px"></span><span style="height:340px"></span><span style="height:260px"></span><span style="height:220px"></span><span style="height:300px"></span><span style="height:240px"></span></div>
+</div>
+
+<!-- lightbox -->
+<div class="lb" id="lb" aria-hidden="true">
+  <button class="x" id="lbClose" aria-label="Close">✕</button>
+  <button class="nav prev" id="lbPrev" aria-label="Previous">‹</button>
+  <img id="lbImg" alt="" />
+  <div class="cap mono" id="lbCap"></div>
+  <button class="nav next" id="lbNext" aria-label="Next">›</button>
+</div>
+
+<!-- auth + upload panel -->
+<div class="panel" id="panel">
+  <div class="sheet2">
+    <button class="close-x" id="panelClose">✕</button>
+
+    <div id="authView">
+      <h2>Owner sign in</h2>
+      <p class="sub">Enter your email and we'll send a one-tap magic link. Only signed-in owners can add photos — everyone can view.</p>
+      <label class="fld" for="email">Email</label>
+      <input type="email" id="email" placeholder="you@example.com" autocomplete="email" />
+      <button class="pbtn" id="sendLink">Send magic link</button>
+      <div class="msg mono" id="authMsg"></div>
+    </div>
+
+    <div id="uploadView" style="display:none">
+      <h2>Add to the dump</h2>
+      <p class="sub">Pick one or more photos — originals upload at full quality.</p>
+      <div class="drop" id="drop">
+        <div class="mono" id="dropLabel">Tap to choose photos</div>
+      </div>
+      <input type="file" id="file" accept="image/*" multiple hidden />
+      <label class="fld" for="caption">Caption (optional, applies to all)</label>
+      <input type="text" id="caption" placeholder="golden hour, day 2…" />
+      <button class="pbtn" id="doUpload" disabled>Upload</button>
+      <div class="msg mono" id="upMsg"></div>
+      <button class="ibtn" id="signOut" style="margin-top:18px">Sign out</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ─────────── CONFIG — EDIT THESE TWO LINES ─────────── */
+const SUPABASE_URL = "https://yypnrbipblcxvqaxdrhp.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_2Tf1njZpieS0DCmO8XsIIw_LsoSvPo5";
+const BUCKET = "photos";
+const TABLE  = "photos";
+/* ──────────────────────────────────────────────────── */
+
+const configured = !SUPABASE_URL.includes("YOUR-PROJECT") && !SUPABASE_ANON_KEY.includes("YOUR-ANON");
+const sb = configured ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+
+const $ = id => document.getElementById(id);
+const view = $("view");
+let photos = [];      // {url, caption, idx}
+let lbAt = 0;
+
+/* ---------- load + render ---------- */
+async function load(){
+  if(!configured){
+    view.innerHTML = `<div class="state">
+      <h3>Almost there — add your Supabase keys</h3>
+      <p>Open this file and set <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> near the bottom, then commit again.</p></div>`;
+    $("count").textContent = "Not connected";
+    return;
+  }
+  try{
+    const { data, error } = await sb.from(TABLE).select("*").order("created_at",{ascending:false});
+    if(error) throw error;
+    photos = (data||[]).map((r,i)=>({
+      url: sb.storage.from(BUCKET).getPublicUrl(r.path).data.publicUrl,
+      caption: r.caption || "",
+      idx: String((data.length - i)).padStart(3,"0")
+    }));
+    render();
+  }catch(e){
+    view.innerHTML = `<div class="state"><h3>Couldn't load photos</h3><p>${e.message}</p>
+      <p>Check that the <code>photos</code> table exists and public read is allowed.</p></div>`;
+    $("count").textContent = "Error";
+  }
+}
+
+function render(){
+  $("count").textContent = `${photos.length} frame${photos.length===1?"":"s"}`;
+  if(!photos.length){
+    view.innerHTML = `<div class="state"><h3>The roll is empty</h3>
+      <p>Sign in as the owner and tap <b>+ Add</b> to drop in your first photos.</p></div>`;
+    return;
+  }
+  const sheet = document.createElement("div");
+  sheet.className = "sheet";
+  photos.forEach((p,i)=>{
+    const fig = document.createElement("figure");
+    fig.innerHTML = `<span class="idx">${p.idx}</span>
+      <img loading="lazy" decoding="async" src="${p.url}" alt="${p.caption||"frame "+p.idx}">
+      ${p.caption?`<figcaption>${p.caption}</figcaption>`:""}`;
+    fig.onclick = ()=>openLb(i);
+    sheet.appendChild(fig);
+  });
+  view.replaceChildren(sheet);
+}
+
+/* ---------- lightbox ---------- */
+function openLb(i){lbAt=i;showLb();$("lb").classList.add("open");}
+function showLb(){const p=photos[lbAt];$("lbImg").src=p.url;$("lbCap").innerHTML=`<b>${p.idx}</b>${p.caption||""}`;}
+function step(d){lbAt=(lbAt+d+photos.length)%photos.length;showLb();}
+$("lbClose").onclick=()=>$("lb").classList.remove("open");
+$("lbPrev").onclick=e=>{e.stopPropagation();step(-1);};
+$("lbNext").onclick=e=>{e.stopPropagation();step(1);};
+$("lb").onclick=e=>{if(e.target.id==="lb")$("lb").classList.remove("open");};
+document.addEventListener("keydown",e=>{
+  if(!$("lb").classList.contains("open"))return;
+  if(e.key==="Escape")$("lb").classList.remove("open");
+  if(e.key==="ArrowLeft")step(-1);
+  if(e.key==="ArrowRight")step(1);
+});
+// swipe
+let tx=0;
+$("lb").addEventListener("touchstart",e=>tx=e.touches[0].clientX,{passive:true});
+$("lb").addEventListener("touchend",e=>{const dx=e.changedTouches[0].clientX-tx;if(Math.abs(dx)>50)step(dx>0?-1:1);},{passive:true});
+
+/* ---------- panel open/close ---------- */
+const panel=$("panel");
+$("ownerBtn").onclick=()=>panel.classList.add("open");
+$("addBtn").onclick=()=>panel.classList.add("open");
+$("panelClose").onclick=()=>panel.classList.remove("open");
+panel.onclick=e=>{if(e.target===panel)panel.classList.remove("open");};
+
+/* ---------- auth ---------- */
+async function refreshAuth(){
+  if(!configured)return;
+  const { data:{ session } } = await sb.auth.getSession();
+  const signedIn = !!session;
+  $("authView").style.display = signedIn?"none":"block";
+  $("uploadView").style.display = signedIn?"block":"none";
+  $("ownerBtn").style.display = signedIn?"none":"inline-block";
+  $("addBtn").style.display = signedIn?"inline-block":"none";
+  const who=$("who");
+  if(signedIn){who.style.display="inline";who.textContent=session.user.email;}
+  else who.style.display="none";
+}
+$("sendLink").onclick=async()=>{
+  const email=$("email").value.trim();
+  const m=$("authMsg");
+  if(!email){m.className="msg mono err";m.textContent="Enter your email first.";return;}
+  m.className="msg mono";m.textContent="Sending…";
+  const { error } = await sb.auth.signInWithOtp({email,options:{emailRedirectTo:location.href}});
+  if(error){m.className="msg mono err";m.textContent=error.message;}
+  else{m.className="msg mono ok";m.textContent="Check your inbox — tap the link on this device.";}
+};
+$("signOut").onclick=async()=>{await sb.auth.signOut();panel.classList.remove("open");refreshAuth();};
+
+/* ---------- upload ---------- */
+let chosen=[];
+$("drop").onclick=()=>$("file").click();
+$("file").onchange=e=>{
+  chosen=[...e.target.files];
+  $("dropLabel").textContent = chosen.length?`${chosen.length} photo${chosen.length===1?"":"s"} ready`:"Tap to choose photos";
+  $("doUpload").disabled=!chosen.length;
+};
+$("doUpload").onclick=async()=>{
+  const m=$("upMsg");const cap=$("caption").value.trim();
+  $("doUpload").disabled=true;
+  let done=0;
+  for(const file of chosen){
+    m.className="msg mono";m.textContent=`Uploading ${done+1}/${chosen.length}…`;
+    const ext=(file.name.split(".").pop()||"jpg").toLowerCase();
+    const path=`${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
+    const up=await sb.storage.from(BUCKET).upload(path,file,{cacheControl:"3600",upsert:false});
+    if(up.error){m.className="msg mono err";m.textContent="Upload failed: "+up.error.message;$("doUpload").disabled=false;return;}
+    const ins=await sb.from(TABLE).insert({path,caption:cap});
+    if(ins.error){m.className="msg mono err";m.textContent="Saved file but DB insert failed: "+ins.error.message;$("doUpload").disabled=false;return;}
+    done++;
+  }
+  m.className="msg mono ok";m.textContent=`Added ${done} photo${done===1?"":"s"}.`;
+  chosen=[];$("file").value="";$("dropLabel").textContent="Tap to choose photos";$("caption").value="";
+  await load();
+  setTimeout(()=>{panel.classList.remove("open");m.textContent="";},900);
+};
+
+/* ---------- boot ---------- */
+if(configured){ sb.auth.onAuthStateChange(()=>refreshAuth()); refreshAuth(); }
+load();
+</script>
+</body>
+</html>
