@@ -117,8 +117,7 @@
     </div>
     <div class="actions">
       <span class="who mono" id="who"></span>
-      <button class="ibtn" id="ownerBtn">Sign in</button>
-      <button class="ibtn go" id="addBtn" style="display:none">+ Add</button>
+      <button class="ibtn go" id="addBtn">+ Add</button>
     </div>
   </div>
 </header>
@@ -148,13 +147,11 @@
     <button class="close-x" id="panelClose">✕</button>
 
     <div id="authView">
-      <h2>Owner sign in</h2>
-      <p class="sub">Sign in with your owner email and password. Only you can add photos — everyone can view.</p>
+      <h2>Your email</h2>
+      <p class="sub">Enter your email to add photos. It's saved with each upload.</p>
       <label class="fld" for="email">Email</label>
       <input type="email" id="email" placeholder="you@example.com" autocomplete="email" />
-      <label class="fld" for="password">Password</label>
-      <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" />
-      <button class="pbtn" id="signIn">Sign in</button>
+      <button class="pbtn" id="continueBtn">Continue</button>
       <div class="msg mono" id="authMsg"></div>
     </div>
 
@@ -169,7 +166,7 @@
       <input type="text" id="caption" placeholder="golden hour, day 2…" />
       <button class="pbtn" id="doUpload" disabled>Upload</button>
       <div class="msg mono" id="upMsg"></div>
-      <button class="ibtn" id="signOut" style="margin-top:18px">Sign out</button>
+      <button class="ibtn" id="changeEmail" style="margin-top:18px">Change email</button>
     </div>
   </div>
 </div>
@@ -256,35 +253,26 @@ $("lb").addEventListener("touchend",e=>{const dx=e.changedTouches[0].clientX-tx;
 
 /* ---------- panel open/close ---------- */
 const panel=$("panel");
-$("ownerBtn").onclick=()=>panel.classList.add("open");
-$("addBtn").onclick=()=>panel.classList.add("open");
+$("addBtn").onclick=()=>{panel.classList.add("open");showPanel();};
 $("panelClose").onclick=()=>panel.classList.remove("open");
 panel.onclick=e=>{if(e.target===panel)panel.classList.remove("open");};
 
-/* ---------- auth ---------- */
-async function refreshAuth(){
-  if(!configured)return;
-  const { data:{ session } } = await sb.auth.getSession();
-  const signedIn = !!session;
-  $("authView").style.display = signedIn?"none":"block";
-  $("uploadView").style.display = signedIn?"block":"none";
-  $("ownerBtn").style.display = signedIn?"none":"inline-block";
-  $("addBtn").style.display = signedIn?"inline-block":"none";
+/* ---------- email gate (no password) ---------- */
+let ownerEmail = "";
+function showPanel(){
+  const has = !!ownerEmail;
+  $("authView").style.display = has?"none":"block";
+  $("uploadView").style.display = has?"block":"none";
   const who=$("who");
-  if(signedIn){who.style.display="inline";who.textContent=session.user.email;}
-  else who.style.display="none";
+  if(has){who.style.display="inline";who.textContent=ownerEmail;} else who.style.display="none";
 }
-$("signIn").onclick=async()=>{
+$("continueBtn").onclick=()=>{
   const email=$("email").value.trim();
-  const password=$("password").value;
   const m=$("authMsg");
-  if(!email||!password){m.className="msg mono err";m.textContent="Enter your email and password.";return;}
-  m.className="msg mono";m.textContent="Signing in…";
-  const { error } = await sb.auth.signInWithPassword({email,password});
-  if(error){m.className="msg mono err";m.textContent=error.message;}
-  else{m.textContent="";}
+  if(!email||!email.includes("@")){m.className="msg mono err";m.textContent="Enter a valid email.";return;}
+  ownerEmail=email; m.textContent=""; showPanel();
 };
-$("signOut").onclick=async()=>{await sb.auth.signOut();panel.classList.remove("open");refreshAuth();};
+$("changeEmail").onclick=()=>{ownerEmail="";$("email").value="";showPanel();};
 
 /* ---------- upload ---------- */
 let chosen=[];
@@ -304,7 +292,7 @@ $("doUpload").onclick=async()=>{
     const path=`${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
     const up=await sb.storage.from(BUCKET).upload(path,file,{cacheControl:"3600",upsert:false});
     if(up.error){m.className="msg mono err";m.textContent="Upload failed: "+up.error.message;$("doUpload").disabled=false;return;}
-    const ins=await sb.from(TABLE).insert({path,caption:cap});
+    const ins=await sb.from(TABLE).insert({path,caption:cap,email:ownerEmail});
     if(ins.error){m.className="msg mono err";m.textContent="Saved file but DB insert failed: "+ins.error.message;$("doUpload").disabled=false;return;}
     done++;
   }
@@ -315,7 +303,6 @@ $("doUpload").onclick=async()=>{
 };
 
 /* ---------- boot ---------- */
-if(configured){ sb.auth.onAuthStateChange(()=>refreshAuth()); refreshAuth(); }
 load();
 </script>
 </body>
